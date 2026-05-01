@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+uploads/
+outputs/
+surveillance_logs/
+models/*.pth
+models/YOLOv3spp-19.pt

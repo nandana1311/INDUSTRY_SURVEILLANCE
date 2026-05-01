@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SafeGuard · Model Comparison</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0b0c0e;--ink2:#23252a;--ink3:#454850;--muted:#868a94;
+  --line:#e4e5e8;--line2:#d0d1d6;
+  --bg:#f7f7f5;--surface:#ffffff;--surface2:#f2f2ef;
+  --green:#1a9e5c;--green-bg:#edfaf3;--green-line:#a3e6c4;
+  --red:#d93025;--red-bg:#fef0ee;--red-line:#f5b0aa;
+  --amber:#c97c0a;--amber-bg:#fef8ec;--amber-line:#f5d98a;
+  --blue:#1d5bdb;--blue-bg:#eef3ff;--blue-line:#afc6f8;
+  --r:10px;--r2:16px;
+}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit',sans-serif;min-height:100vh}
+
+header{background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:56px;position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;font-family:'Space Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.04em}
+.logo-icon{width:28px;height:28px;background:#1a9e5c;border-radius:6px;display:flex;align-items:center;justify-content:center}
+.logo-icon svg{width:16px;height:16px}
+.nav-pills{display:flex;gap:4px}
+.nav-pill{font-size:12px;padding:5px 14px;border-radius:20px;cursor:pointer;border:none;font-family:'Outfit',sans-serif;font-weight:500;transition:.15s;text-decoration:none;display:flex;align-items:center;gap:6px}
+.nav-pill.active{background:#1a9e5c;color:#fff}
+.nav-pill:not(.active){background:rgba(255,255,255,.08);color:rgba(255,255,255,.7)}
+.nav-pill:not(.active):hover{background:rgba(255,255,255,.14);color:#fff}
+
+.shell{max-width:1400px;margin:0 auto;padding:28px 24px 60px}
+
+/* ── Upload zone ── */
+.upload-zone{background:var(--surface);border:2px dashed var(--line2);border-radius:var(--r2);padding:40px 32px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;position:relative;margin-bottom:28px}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--blue);background:var(--blue-bg)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.up-icon{width:48px;height:48px;background:var(--surface2);border-radius:11px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center}
+.up-icon svg{width:24px;height:24px;stroke:var(--muted)}
+.upload-zone h3{font-size:15px;font-weight:600;margin-bottom:5px}
+.upload-zone p{font-size:13px;color:var(--muted)}
+
+/* ── Progress ── */
+.run-progress{background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);padding:24px;display:none;margin-bottom:24px}
+.run-progress h3{font-size:14px;font-weight:600;margin-bottom:16px}
+.model-progs{display:flex;flex-direction:column;gap:10px}
+.mp-row{display:flex;align-items:center;gap:12px}
+.mp-name{font-size:12.5px;width:200px;flex-shrink:0}
+.mp-bar{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+.mp-fill{height:100%;border-radius:3px;width:0%;transition:width .4s}
+.mp-status{font-size:11px;width:80px;text-align:right;color:var(--muted);font-family:'Space Mono',monospace}
+
+/* ── Results header ── */
+.results-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.results-head h2{font-size:15px;font-weight:700}
+.results-head p{font-size:13px;color:var(--muted)}
+
+/* ── Summary bar ── */
+.summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+@media(max-width:700px){.summary-row{grid-template-columns:1fr 1fr}}
+.sum-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.sum-card .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px}
+.sum-card .val{font-size:22px;font-weight:700;font-family:'Space Mono',monospace;line-height:1}
+.sum-card .sub{font-size:11px;color:var(--muted);margin-top:4px}
+.sum-card.highlight{border-color:var(--green-line);background:var(--green-bg)}
+.sum-card.highlight .val{color:var(--green)}
+
+/* ── Metrics chart ── */
+.metrics-section{background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);padding:24px;margin-bottom:24px}
+.metrics-section h3{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:20px}
+.metrics-table{width:100%;border-collapse:collapse}
+.metrics-table th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:500;text-align:left;padding:8px 12px;border-bottom:1px solid var(--line)}
+.metrics-table td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:middle}
+.metrics-table tr:last-child td{border-bottom:none}
+.metrics-table tr.best-row td{background:var(--green-bg)}
+.model-name-cell{display:flex;align-items:center;gap:8px}
+.model-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.badge{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600}
+.badge-best{background:var(--green-bg);color:var(--green);border:1px solid var(--green-line)}
+.badge-found{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-line)}
+.badge-miss{background:var(--red-bg);color:var(--red);border:1px solid var(--red-line)}
+.mono{font-family:'Space Mono',monospace;font-size:12px}
+.mini-bar{height:4px;background:var(--surface2);border-radius:2px;margin-top:4px;width:100px}
+.mini-fill{height:100%;border-radius:2px}
+
+/* ── Image grid ── */
+.img-section h3{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:16px}
+.img-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:900px){.img-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.img-grid{grid-template-columns:1fr}}
+
+.img-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;transition:border-color .2s}
+.img-card.best{border-color:var(--green-line);border-width:2px}
+.img-card-head{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ic-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.ic-back{font-size:11px;color:var(--muted)}
+.ic-meta{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted);font-family:'Space Mono',monospace}
+.img-wrap{position:relative;background:#000;line-height:0}
+.img-wrap img{width:100%;display:block;object-fit:contain;max-height:280px}
+.img-placeholder{height:200px;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px}
+.img-card-foot{padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap}
+.det-chip{font-size:11px;padding:3px 8px;border-radius:4px;background:var(--surface2);border:1px solid var(--line);color:var(--ink3)}
+.det-chip.viol{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
+
+/* ── Spinner ── */
+.spinner{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.reset-btn{font-size:13px;padding:7px 16px;background:var(--surface);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;transition:.15s}
+.reset-btn:hover{background:var(--surface2)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M8 1L14 4.5V11L8 14.5L2 11V4.5L8 1Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5L10.5 6.5V9.5L8 11L5.5 9.5V6.5L8 5Z" fill="white"/></svg>
+    </div>
+    SafeGuard
+  </div>
+  <div class="nav-pills">
+    <a href="/" class="nav-pill">Dashboard</a>
+    <a href="/comparison" class="nav-pill active">⊞ Compare Models</a>
+    <a href="/webcam" class="nav-pill" target="_blank">◉ Live Cam</a>
+  </div>
+</header>
+
+<div class="shell">
+
+  <!-- Upload -->
+  <div class="upload-zone" id="upload-zone">
+    <input type="file" id="file-input" accept="image/*">
+    <div class="up-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 16.5V19a1 1 0 001 1h14a1 1 0 001-1v-2.5"/><path d="M12 4v12M8 8l4-4 4 4"/>
+      </svg>
+    </div>
+    <h3>Upload image to compare all 6 models</h3>
+    <p>YOLOv8n · YOLOv5 · YOLOv3-spp · Faster R-CNN (ResNet50) · Faster R-CNN (MobileNet) · SSD</p>
+  </div>
+
+  <!-- Per-model progress -->
+  <div class="run-progress" id="run-progress">
+    <h3>Running inference across all models…</h3>
+    <div class="model-progs" id="model-progs"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-section" style="display:none">
+    <div class="results-head">
+      <div>
+        <h2 id="res-title">Comparison Results</h2>
+        <p id="res-sub"></p>
+      </div>
+      <button class="reset-btn" onclick="resetPage()">← Upload new image</button>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary-row">
+      <div class="sum-card highlight">
+        <div class="lbl">Best mAP@0.5</div>
+        <div class="val" id="s-best-map">—</div>
+        <div class="sub" id="s-best-name">—</div>
+      </div>
+      <div class="sum-card">
+        <div class="lbl">Fastest Model</div>
+        <div class="val" id="s-fastest">—</div>
+        <div class="sub" id="s-fastest-name">—</div>
+      </div>
+      <div class="sum-card">
+        <div class="lbl">Most Detections</div>
+        <div class="val" id="s-most">—</div>
+        <div class="sub" id="s-most-name">—</div>
+      </div>
+      <div class="sum-card">
+        <div class="lbl">Models Loaded</div>
+        <div class="val" id="s-loaded">—</div>
+        <div class="sub">of 6 found</div>
+      </div>
+    </div>
+
+    <!-- Metrics table -->
+    <div class="metrics-section">
+      <h3>Benchmark Metrics (Experimental Analysis)</h3>
+      <table class="metrics-table" id="metrics-table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Backbone</th>
+            <th>mAP@0.5</th>
+            <th>Precision</th>
+            <th>Recall</th>
+            <th>FPS</th>
+            <th>Inference</th>
+            <th>Detections</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="metrics-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Annotated images -->
+    <div class="img-section">
+      <h3>Annotated Outputs</h3>
+      <div class="img-grid" id="img-grid"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = '';
+const MODELS = [
+  {id:'yolov8n', name:'YOLOv8n',               color:'#16a34a'},
+  {id:'yolov5',  name:'YOLOv5',                color:'#7c3aed'},
+  {id:'yolov3',  name:'YOLOv3-spp',            color:'#db2777'},
+  {id:'frcnn_r', name:'Faster R-CNN (ResNet)', color:'#2563eb'},
+  {id:'frcnn_m', name:'Faster R-CNN (Mobile)', color:'#0891b2'},
+  {id:'ssd',     name:'SSD',                   color:'#d97706'},
+];
+const VIOL_CLASSES = ['NO-Hardhat','NO-Mask','NO-Safety Vest'];
+
+const zone      = document.getElementById('upload-zone');
+const fileInput = document.getElementById('file-input');
+
+zone.addEventListener('dragover',  e=>{ e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', ()=> zone.classList.remove('drag'));
+zone.addEventListener('drop', e=>{ e.preventDefault(); zone.classList.remove('drag'); const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) runCompare(f); });
+fileInput.addEventListener('change', e=>{ if(e.target.files[0]) runCompare(e.target.files[0]); });
+
+function buildProgress() {
+  document.getElementById('model-progs').innerHTML = MODELS.map(m=>`
+    <div class="mp-row" id="mpr-${m.id}">
+      <div class="mp-name" style="display:flex;align-items:center;gap:8px">
+        <div style="width:8px;height:8px;border-radius:50%;background:${m.color};flex-shrink:0"></div>
+        ${m.name}
+      </div>
+      <div class="mp-bar"><div class="mp-fill" id="mpf-${m.id}" style="background:${m.color}"></div></div>
+      <div class="mp-status" id="mps-${m.id}">waiting</div>
+    </div>`).join('');
+}
+
+function setModelProg(id, pct, label) {
+  const f = document.getElementById('mpf-'+id);
+  const s = document.getElementById('mps-'+id);
+  if(f) f.style.width = pct+'%';
+  if(s) s.textContent = label;
+}
+
+async function runCompare(file) {
+  zone.style.display = 'none';
+  document.getElementById('results-section').style.display = 'none';
+  buildProgress();
+  document.getElementById('run-progress').style.display = 'block';
+
+  // Animate progress bars while waiting
+  MODELS.forEach((m,i) => setTimeout(()=>{ setModelProg(m.id, 10+i*5, 'running…'); }, i*300));
+
+  const fd = new FormData();
+  fd.append('image', file);
+
+  let data;
+  try {
+    // Simulate incremental progress
+    const interval = setInterval(()=>{
+      MODELS.forEach(m=>{
+        const cur = parseFloat(document.getElementById('mpf-'+m.id)?.style.width||'0');
+        if(cur < 85) setModelProg(m.id, cur+5, 'running…');
+      });
+    }, 600);
+
+    const res = await fetch(`${API}/api/compare`, {method:'POST', body:fd});
+    data = await res.json();
+    clearInterval(interval);
+    MODELS.forEach(m => setModelProg(m.id, 100, 'done'));
+  } catch(e) {
+    // Demo fallback
+    data = { results: buildDemoResults(file) };
+    MODELS.forEach(m => setModelProg(m.id, 100, 'demo'));
+  }
+
+  setTimeout(()=>{
+    document.getElementById('run-progress').style.display = 'none';
+    renderResults(file.name, data.results);
+    document.getElementById('results-section').style.display = 'block';
+  }, 600);
+}
+
+function buildDemoResults(file) {
+  const seed = (file.name+file.size).split('').reduce((h,c)=>Math.imul(31,h)+c.charCodeAt(0)|0,0);
+  const sr = s => { let x=Math.sin(s)*10000; return x-Math.floor(x); };
+  const BM = {
+    yolov8n:{ap50:81.0,precision:83.2,recall:78.6,fps:45},
+    yolov5: {ap50:79.3,precision:81.5,recall:76.8,fps:52},
+    yolov3: {ap50:74.8,precision:77.6,recall:72.0,fps:38},
+    frcnn_r:{ap50:78.4,precision:81.2,recall:76.8,fps:12},
+    frcnn_m:{ap50:72.1,precision:75.4,recall:69.3,fps:22},
+    ssd:    {ap50:65.7,precision:68.9,recall:62.1,fps:58},
+  };
+  const TIMING={yolov8n:28,yolov5:22,yolov3:38,frcnn_r:310,frcnn_m:190,ssd:95};
+  const CLASSES=['Hardhat','Mask','Safety Vest','NO-Hardhat','NO-Mask','Person','Safety Cone'];
+  return MODELS.map((m,mi)=>{
+    const dets = CLASSES.filter((_,ci)=>sr(seed+mi*17+ci)>0.4)
+      .map((cls,di)=>({label:cls,confidence:+(0.45+sr(seed+mi*7+di)*0.5).toFixed(2),bbox:[]}));
+    return {
+      ...m, ...BM[m.id],
+      backbone:['CSPDarkNet','CSP-DarkNet53','DarkNet53','ResNet50+FPN','MobileNetV3','VGG16'][mi],
+      inference_ms:TIMING[m.id],
+      detections:dets, det_count:dets.length,
+      image_b64:null, model_found:false, demo:true
+    };
+  });
+}
+
+function renderResults(filename, results) {
+  const best    = results.reduce((b,r)=>r.ap50>b.ap50?r:b, results[0]);
+  const fastest = results.reduce((b,r)=>r.inference_ms<b.inference_ms?r:b, results[0]);
+  const most    = results.reduce((b,r)=>r.det_count>b.det_count?r:b, results[0]);
+  const loaded  = results.filter(r=>r.model_found).length;
+
+  document.getElementById('res-title').textContent = `Comparison — ${filename}`;
+  document.getElementById('res-sub').textContent   = `${results.length} models · ${results.reduce((s,r)=>s+r.det_count,0)} total detections`;
+  document.getElementById('s-best-map').textContent  = best.ap50+'%';
+  document.getElementById('s-best-name').textContent = best.name;
+  document.getElementById('s-fastest').textContent   = fastest.inference_ms+'ms';
+  document.getElementById('s-fastest-name').textContent = fastest.name;
+  document.getElementById('s-most').textContent      = most.det_count;
+  document.getElementById('s-most-name').textContent = most.name;
+  document.getElementById('s-loaded').textContent    = loaded;
+
+  // Metrics table
+  document.getElementById('metrics-body').innerHTML = results.map(r => {
+    const isBest = r.id === best.id;
+    return `<tr ${isBest?'class="best-row"':''}>
+      <td>
+        <div class="model-name-cell">
+          <div class="model-dot" style="background:${r.color}"></div>
+          <span style="font-weight:${isBest?'600':'400'}">${r.name}</span>
+          ${isBest?'<span class="badge badge-best">BEST</span>':''}
+        </div>
+      </td>
+      <td style="color:var(--muted);font-size:12px">${r.backbone}</td>
+      <td>
+        <div class="mono">${r.ap50}%</div>
+        <div class="mini-bar"><div class="mini-fill" style="width:${r.ap50}%;background:${r.color}"></div></div>
+      </td>
+      <td>
+        <div class="mono">${r.precision}%</div>
+        <div class="mini-bar"><div class="mini-fill" style="width:${r.precision}%;background:${r.color}88"></div></div>
+      </td>
+      <td>
+        <div class="mono">${r.recall}%</div>
+        <div class="mini-bar"><div class="mini-fill" style="width:${r.recall}%;background:${r.color}55"></div></div>
+      </td>
+      <td class="mono">${r.fps} fps</td>
+      <td class="mono">${r.inference_ms}ms</td>
+      <td class="mono">${r.det_count}</td>
+      <td>
+        ${r.model_found
+          ? '<span class="badge badge-found">Loaded</span>'
+          : (r.demo ? '<span class="badge" style="background:var(--surface2);color:var(--muted);border:1px solid var(--line)">Demo</span>'
+                    : '<span class="badge badge-miss">Not Found</span>')}
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Image cards
+  document.getElementById('img-grid').innerHTML = results.map(r => {
+    const isBest = r.id === best.id;
+    const detTags = [...new Set(r.detections.map(d=>d.label))].slice(0,8).map(l=>{
+      const isViol = VIOL_CLASSES.includes(l);
+      return `<span class="det-chip ${isViol?'viol':''}">${l}</span>`;
+    }).join('');
+    const imgContent = r.image_b64
+      ? `<img src="data:image/jpeg;base64,${r.image_b64}" alt="${r.name}">`
+      : `<div class="img-placeholder">
+           ${r.demo?'Demo mode — no model file':'Model file not found'}
+         </div>`;
+    return `
+    <div class="img-card ${isBest?'best':''}">
+      <div class="img-card-head">
+        <div>
+          <div class="ic-title">
+            <div style="width:8px;height:8px;border-radius:50%;background:${r.color}"></div>
+            ${r.name}
+            ${isBest?'<span class="badge badge-best">BEST</span>':''}
+          </div>
+          <div class="ic-back">${r.backbone}</div>
+        </div>
+        <div class="ic-meta">
+          <span>${r.inference_ms}ms</span>·<span>${r.det_count} det</span>
+        </div>
+      </div>
+      <div class="img-wrap">${imgContent}</div>
+      <div class="img-card-foot">${detTags || '<span style="font-size:12px;color:var(--muted)">No detections</span>'}</div>
+    </div>`;
+  }).join('');
+}
+
+function resetPage() {
+  document.getElementById('results-section').style.display = 'none';
+  zone.style.display = 'block';
+  fileInput.value = '';
+}
+</script>
+</body>
+</html>

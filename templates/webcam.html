@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SafeGuard · Live Camera</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0b0c0e;color:#fff;font-family:'Outfit',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:52px;border-bottom:1px solid #1e2024}
+.logo{display:flex;align-items:center;gap:8px;font-family:'Space Mono',monospace;font-size:12px;font-weight:700;color:#fff}
+.logo-icon{width:26px;height:26px;background:#1a9e5c;border-radius:6px;display:flex;align-items:center;justify-content:center}
+.logo-icon svg{width:14px;height:14px}
+.live-badge{font-size:10px;padding:3px 9px;background:#d93025;border-radius:4px;font-weight:700;letter-spacing:.08em;animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.back-btn{font-size:12px;color:#868a94;text-decoration:none;display:flex;align-items:center;gap:5px}
+.back-btn:hover{color:#fff}
+
+.main{flex:1;display:grid;grid-template-columns:1fr 280px;gap:0;overflow:hidden}
+@media(max-width:700px){.main{grid-template-columns:1fr}}
+
+.cam-area{position:relative;background:#000;display:flex;align-items:center;justify-content:center;min-height:480px}
+.cam-area img{width:100%;height:100%;object-fit:contain;display:block}
+.cam-offline{text-align:center;color:#454850}
+.cam-offline svg{width:48px;height:48px;stroke:#2a2c30;margin-bottom:12px}
+.cam-offline p{font-size:13px}
+.cam-offline small{font-size:11px;color:#454850;margin-top:6px;display:block}
+
+.sidebar{background:#111214;border-left:1px solid #1e2024;padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+.sb-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#454850;font-weight:600;margin-bottom:4px}
+
+.stat-mini{background:#18191c;border:1px solid #25272c;border-radius:8px;padding:12px}
+.stat-mini .val{font-size:22px;font-weight:700;font-family:'Space Mono',monospace;line-height:1}
+.stat-mini .lbl{font-size:11px;color:#555;margin-top:3px}
+.stat-mini.red .val{color:#e05555}
+.stat-mini.amber .val{color:#d4a030}
+.stat-mini.green .val{color:#1a9e5c}
+
+.status-pill{padding:10px 14px;border-radius:8px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px}
+.status-pill.clear{background:#edfaf3;color:#1a9e5c}
+.status-pill.warn{background:#fef8ec;color:#c97c0a}
+.status-pill.danger{background:#fef0ee;color:#d93025}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+.alerts-mini{background:#18191c;border:1px solid #25272c;border-radius:8px;overflow:hidden;flex:1}
+.alerts-mini-head{padding:10px 12px;border-bottom:1px solid #25272c;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#454850}
+.alerts-mini-list{max-height:300px;overflow-y:auto}
+.am-item{padding:8px 12px;border-bottom:1px solid #1e2024;font-size:11px;color:#9ea3ae;line-height:1.4}
+.am-item:last-child{border-bottom:none}
+.am-tag{display:inline-block;font-size:9px;padding:1px 6px;border-radius:3px;font-weight:700;margin-right:5px}
+.am-tag.c{background:#3a1515;color:#e05555}
+.am-tag.h{background:#3a2a10;color:#d4a030}
+.am-tag.m{background:#0f1e35;color:#4a8adf}
+.no-data{padding:20px;text-align:center;color:#454850;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M8 1L14 4.5V11L8 14.5L2 11V4.5L8 1Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5L10.5 6.5V9.5L8 11L5.5 9.5V6.5L8 5Z" fill="white"/></svg>
+    </div>
+    SafeGuard
+  </div>
+  <span class="live-badge">● LIVE</span>
+  <a class="back-btn" href="/">← Back to Dashboard</a>
+</header>
+
+<div class="main">
+  <div class="cam-area" id="cam-area">
+    <img id="cam-feed" src="/api/webcam/feed" alt="Live feed"
+         onerror="showOffline()" style="display:none">
+    <div class="cam-offline" id="cam-offline">
+      <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        <line x1="1" y1="1" x2="23" y2="23"/>
+      </svg>
+      <p>Camera feed loading…</p>
+      <small>Make sure the system is initialised<br>and a camera is connected.</small>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div>
+      <div class="sb-title">System Status</div>
+      <div class="status-pill clear" id="live-status">
+        <div class="dot"></div> Monitoring Active
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="stat-mini red">
+        <div class="val" id="lv-viol">0</div>
+        <div class="lbl">Violations</div>
+      </div>
+      <div class="stat-mini amber">
+        <div class="val" id="lv-fire">0</div>
+        <div class="lbl">Fire/Smoke</div>
+      </div>
+      <div class="stat-mini green">
+        <div class="val" id="lv-frames">0</div>
+        <div class="lbl">Frames</div>
+      </div>
+      <div class="stat-mini">
+        <div class="val" id="lv-alerts">0</div>
+        <div class="lbl">Alerts</div>
+      </div>
+    </div>
+
+    <div class="alerts-mini">
+      <div class="alerts-mini-head">Live Alerts</div>
+      <div class="alerts-mini-list" id="live-alerts">
+        <div class="no-data">No alerts yet</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const feed    = document.getElementById('cam-feed');
+const offline = document.getElementById('cam-offline');
+
+feed.onload = () => { feed.style.display='block'; offline.style.display='none'; };
+
+function showOffline() {
+  feed.style.display = 'none';
+  offline.style.display = 'block';
+}
+
+async function poll() {
+  try {
+    const d = await fetch('/api/status').then(r=>r.json());
+    if(d.stats) {
+      document.getElementById('lv-viol').textContent   = d.stats.ppe_violations||0;
+      document.getElementById('lv-fire').textContent   = (d.stats.fire||0)+(d.stats.smoke||0);
+      document.getElementById('lv-frames').textContent = d.stats.frames||0;
+      document.getElementById('lv-alerts').textContent = d.stats.total_alerts||0;
+      const s = document.getElementById('live-status');
+      if((d.stats.fire||0)>0){s.className='status-pill danger';s.innerHTML='<div class="dot"></div> CRITICAL — Fire Detected';}
+      else if((d.stats.ppe_violations||0)>0){s.className='status-pill warn';s.innerHTML='<div class="dot"></div> WARNING — PPE Violation';}
+      else{s.className='status-pill clear';s.innerHTML='<div class="dot"></div> All Clear';}
+    }
+    const a = await fetch('/api/alerts').then(r=>r.json());
+    const list = document.getElementById('live-alerts');
+    if(a.alerts&&a.alerts.length>0){
+      list.innerHTML=[...a.alerts].reverse().slice(0,15).map(al=>{
+        const sev=al.severity;
+        const tag=sev>=3?'c':sev>=2?'h':'m';
+        const tagTxt=['INFO','WARN','HIGH','CRIT'][sev]||'INFO';
+        return `<div class="am-item"><span class="am-tag ${tag}">${tagTxt}</span>${al.msg}</div>`;
+      }).join('');
+    }
+  } catch(e){}
+}
+
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>
