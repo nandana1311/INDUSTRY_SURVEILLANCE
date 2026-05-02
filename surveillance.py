@@ -1,15 +1,4 @@
-"""
-Integrated Safety Surveillance System
-Model: snehilsanyal/Construction-Site-Safety-PPE-Detection (YOLOv8n, 100 epochs)
-Classes: Hardhat, Mask, NO-Hardhat, NO-Mask, NO-Safety Vest, Person,
-         Safety Cone, Safety Vest, machinery, vehicle
 
-Key features:
-  - Per-person PPE association (no cross-person confusion)
-  - Direct violation class alerts (NO-Hardhat etc.)
-  - Parallel PPE + Fire inference
-  - Real-time / image / video modes
-"""
 
 import cv2
 import numpy as np
@@ -38,7 +27,7 @@ except ImportError:
 # CONFIGURATION
 # ============================================================
 class Config:
-    # ── PPE model classes (snehilsanyal model) ───────────────
+    # ── PPE model classes  ───────────────
     PERSON_CLASS    = 'Person'
     PPE_CLASSES     = ['Hardhat', 'Mask', 'Safety Vest']
     REQUIRED_PPE    = ['Hardhat', 'Mask', 'Safety Vest']
@@ -354,6 +343,16 @@ class SurveillanceSystem:
         self._last_t          = time.time()
 
         print("\n[OK]   System ready.\n" + "="*55 + "\n")
+
+    def reset_stats(self):
+        """Resets the statistics counters so a new file starts fresh."""
+        self.frame_count = 0
+        self.total_violations = 0
+        self.total_fire = 0
+        self.total_smoke = 0
+        self.alerts.history.clear()
+        self._fps_buf.clear()
+        self._last_t = time.time()
 
     def _infer(self, frame):
         results = {}
