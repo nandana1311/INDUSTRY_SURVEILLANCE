@@ -43,7 +43,9 @@ def get_stats():
     return dict(frames=system.frame_count,
                 ppe_violations=system.total_violations,
                 fire=system.total_fire, smoke=system.total_smoke,
-                total_alerts=len(system.alerts.history))
+                total_alerts=len(system.alerts.history),
+                proximity_critical=getattr(system, 'total_proximity_crit', 0),
+                proximity_high=getattr(system, 'total_proximity_high', 0))
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')

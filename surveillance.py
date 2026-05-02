@@ -1,5 +1,3 @@
-
-
 import cv2
 import numpy as np
 from pathlib import Path
@@ -38,6 +36,17 @@ class Config:
     }
     IGNORE_CLASSES  = ['Safety Cone', 'machinery', 'vehicle']
 
+    # ── Hazard objects for proximity reasoning ────────────────
+    # These are the classes whose proximity to a non-compliant
+    # worker escalates the alert to CRITICAL.
+    PROXIMITY_HAZARD_CLASSES = ['machinery', 'vehicle']
+
+    # ── Proximity thresholds (pixels) ────────────────────────
+    # Distance from person centre to hazard object centre.
+    # Tune these based on your typical camera distance.
+    PROXIMITY_CRITICAL_PX = 150   # within 150px → CRITICAL
+    PROXIMITY_HIGH_PX     = 300   # within 300px → HIGH (was already HIGH)
+
     # ── Fire model ───────────────────────────────────────────
     HAZARD_CLASSES  = ['fire', 'smoke']
 
@@ -73,6 +82,7 @@ class Config:
     C_SMOKE     = (160, 160, 160)
     C_WHITE     = (255, 255, 255)
     C_BLACK     = (0, 0, 0)
+    C_PROXIMITY = (0, 100, 255)   # orange — proximity critical alert
 
 
 # ============================================================
@@ -95,6 +105,10 @@ def centre_dist(b1, b2):
     return np.sqrt((c1[0]-c2[0])**2 + (c1[1]-c2[1])**2)
 
 
+def box_centre(b):
+    return (int((b[0]+b[2])/2), int((b[1]+b[3])/2))
+
+
 def box_contains(outer, inner):
     cx = (inner[0]+inner[2])/2
     cy = (inner[1]+inner[3])/2
@@ -102,18 +116,100 @@ def box_contains(outer, inner):
 
 
 # ============================================================
+# PROXIMITY HAZARD ANALYSIS
+# ============================================================
+def analyse_proximity(compliance_list, hazard_objects):
+    """
+    For each non-compliant person, compute the distance to every
+    detected machinery/vehicle object.
+
+    Returns a list of proximity events:
+      {
+        'person_id'   : int,
+        'person_bbox' : [x1,y1,x2,y2],
+        'hazard_class': str,
+        'hazard_bbox' : [x1,y1,x2,y2],
+        'distance_px' : float,
+        'severity'    : int   (CRITICAL or HIGH)
+      }
+
+    Logic:
+      - Only non-compliant workers (status != 'compliant') are checked.
+        A fully-compliant worker near machinery is NOT flagged because
+        they are properly protected.
+      - Distance is centre-to-centre between person bbox and hazard bbox.
+      - severity = CRITICAL if distance < PROXIMITY_CRITICAL_PX
+                 = HIGH     if distance < PROXIMITY_HIGH_PX
+    """
+    events = []
+    for person in compliance_list:
+        if person['status'] == 'compliant':
+            continue  # compliant worker near machinery is fine
+
+        for haz in hazard_objects:
+            dist = centre_dist(person['bbox'], haz['bbox'])
+
+            if dist < Config.PROXIMITY_CRITICAL_PX:
+                severity = Config.SEV_CRITICAL
+            elif dist < Config.PROXIMITY_HIGH_PX:
+                severity = Config.SEV_HIGH
+            else:
+                continue  # outside threshold — no event
+
+            events.append({
+                'person_id':    person['id'],
+                'person_bbox':  person['bbox'],
+                'hazard_class': haz['class'],
+                'hazard_bbox':  haz['bbox'],
+                'distance_px':  round(dist, 1),
+                'severity':     severity,
+                'missing':      person['missing'],
+            })
+
+    return events
+
+
+def draw_proximity_alert(frame, event):
+    """
+    Draws:
+      - A danger-coloured box around the hazard object
+      - A line connecting the non-compliant person to the hazard
+      - A label showing distance and missing PPE
+    """
+    px, py   = box_centre(event['person_bbox'])
+    hx, hy   = box_centre(event['hazard_bbox'])
+    dist_px  = event['distance_px']
+    is_crit  = event['severity'] == Config.SEV_CRITICAL
+    color    = Config.C_FIRE if is_crit else Config.C_PROXIMITY
+
+    # Draw hazard bounding box
+    x1, y1, x2, y2 = [int(v) for v in event['hazard_bbox']]
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
+
+    # Draw line from person centre to hazard centre
+    cv2.line(frame, (px, py), (hx, hy), color, 2, cv2.LINE_AA)
+
+    # Draw distance label at midpoint of the line
+    mid_x, mid_y = (px + hx) // 2, (py + hy) // 2
+    tag   = "CRITICAL" if is_crit else "HIGH RISK"
+    miss  = ", ".join(event['missing']) if event['missing'] else "PPE"
+    label = f"{tag} | {event['hazard_class']} | {dist_px:.0f}px | no {miss}"
+
+    font, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.48, 2
+    (tw, th), bl = cv2.getTextSize(label, font, fs, ft)
+    pad = 5
+    cv2.rectangle(frame,
+                  (mid_x - pad, mid_y - th - pad),
+                  (mid_x + tw + pad, mid_y + bl + pad),
+                  color, -1)
+    cv2.putText(frame, label, (mid_x, mid_y),
+                font, fs, Config.C_WHITE, ft, cv2.LINE_AA)
+
+
+# ============================================================
 # PER-PERSON PPE ASSOCIATION
 # ============================================================
 def associate_ppe_to_persons(persons, ppe_items, violation_items):
-    """
-    For each detected Person bbox:
-      1. Find PPE items whose centre is inside the person box,
-         OR have significant IoU, OR are close enough.
-      2. Find violation items (NO-Hardhat etc.) near that person.
-      3. Determine compliance status per person independently.
-
-    This prevents PPE from one person being counted for another.
-    """
     results = []
     for pidx, pbbox in enumerate(persons):
         present    = set()
@@ -198,7 +294,7 @@ def draw_person_compliance(frame, person):
 
 def draw_dashboard(frame, stats, fps, timings):
     overlay = frame.copy()
-    cv2.rectangle(overlay, (8, 8), (420, 195), (10, 10, 10), -1)
+    cv2.rectangle(overlay, (8, 8), (440, 215), (10, 10, 10), -1)
     cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
     cv2.putText(frame, "SAFETY SURVEILLANCE", (18, 32),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, Config.C_WHITE, 2)
@@ -206,6 +302,8 @@ def draw_dashboard(frame, stats, fps, timings):
         f"Frame {stats['frames']}   FPS {fps:.1f}",
         f"Persons: {stats['persons']}   Violations: {stats['violations']}",
         f"Fire: {stats['fire']}   Smoke: {stats['smoke']}",
+        f"Proximity critical: {stats['proximity_critical']}   "
+        f"high: {stats['proximity_high']}",
         f"Session violations: {stats['total_violations']}",
         f"PPE:{timings.get('ppe',0)*1000:.0f}ms  "
         f"Fire:{timings.get('fire',0)*1000:.0f}ms",
@@ -215,14 +313,17 @@ def draw_dashboard(frame, stats, fps, timings):
         cv2.putText(frame, line, (18, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.46, Config.C_WHITE, 1)
         y += 24
+
     if stats['fire'] > 0:
-        sc, st = Config.C_FIRE,    "STATUS: CRITICAL - FIRE/SMOKE"
-    elif stats['violations'] > 0:
-        sc, st = Config.C_WARNING, "STATUS: WARNING - PPE VIOLATION"
+        sc, st = Config.C_FIRE,     "STATUS: CRITICAL - FIRE/SMOKE"
+    elif stats['proximity_critical'] > 0:
+        sc, st = Config.C_FIRE,     "STATUS: CRITICAL - WORKER NEAR MACHINERY"
+    elif stats['violations'] > 0 or stats['proximity_high'] > 0:
+        sc, st = Config.C_WARNING,  "STATUS: WARNING - PPE VIOLATION"
     else:
-        sc, st = Config.C_SAFE,    "STATUS: ALL CLEAR"
-    cv2.rectangle(frame, (18, 163), (410, 186), sc, -1)
-    cv2.putText(frame, st, (28, 180),
+        sc, st = Config.C_SAFE,     "STATUS: ALL CLEAR"
+    cv2.rectangle(frame, (18, 183), (430, 206), sc, -1)
+    cv2.putText(frame, st, (28, 200),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, Config.C_BLACK, 2)
 
 
@@ -335,21 +436,24 @@ class SurveillanceSystem:
 
         self.alerts = AlertSystem(enable_audio, enable_logging)
 
-        self.frame_count      = 0
-        self.total_violations = 0
-        self.total_fire       = 0
-        self.total_smoke      = 0
-        self._fps_buf         = deque(maxlen=Config.STATS_WINDOW)
-        self._last_t          = time.time()
+        self.frame_count         = 0
+        self.total_violations    = 0
+        self.total_fire          = 0
+        self.total_smoke         = 0
+        self.total_proximity_crit = 0   # NEW: proximity critical events
+        self.total_proximity_high = 0   # NEW: proximity high events
+        self._fps_buf            = deque(maxlen=Config.STATS_WINDOW)
+        self._last_t             = time.time()
 
         print("\n[OK]   System ready.\n" + "="*55 + "\n")
 
     def reset_stats(self):
-        """Resets the statistics counters so a new file starts fresh."""
-        self.frame_count = 0
-        self.total_violations = 0
-        self.total_fire = 0
-        self.total_smoke = 0
+        self.frame_count          = 0
+        self.total_violations     = 0
+        self.total_fire           = 0
+        self.total_smoke          = 0
+        self.total_proximity_crit = 0
+        self.total_proximity_high = 0
         self.alerts.history.clear()
         self._fps_buf.clear()
         self._last_t = time.time()
@@ -357,8 +461,7 @@ class SurveillanceSystem:
     def _infer(self, frame):
         results = {}
         timings = {}
-
-        half = 'cuda' in str(self.device)
+        half    = 'cuda' in str(self.device)
 
         def run_ppe():
             t0 = time.time()
@@ -387,10 +490,14 @@ class SurveillanceSystem:
         ppe_items  = []
         violations = []
         hazards    = []
+        # NEW: collect machinery/vehicle as proximity hazard objects
+        proximity_objects = []
+
         for box in result[0].boxes:
             bbox  = box.xyxy[0].cpu().numpy().tolist()
             conf  = float(box.conf[0])
             cname = names[int(box.cls[0])]
+
             if cname == Config.PERSON_CLASS:
                 persons.append(bbox)
             elif cname in Config.PPE_CLASSES:
@@ -399,7 +506,11 @@ class SurveillanceSystem:
                 violations.append({'class': cname, 'bbox': bbox, 'conf': conf})
             elif cname in Config.HAZARD_CLASSES:
                 hazards.append({'class': cname, 'bbox': bbox, 'conf': conf})
-        return persons, ppe_items, violations, hazards
+            elif cname in Config.PROXIMITY_HAZARD_CLASSES:
+                # Previously just ignored — now captured for proximity analysis
+                proximity_objects.append({'class': cname, 'bbox': bbox, 'conf': conf})
+
+        return persons, ppe_items, violations, hazards, proximity_objects
 
     def process_frame(self, frame):
         self.frame_count += 1
@@ -410,18 +521,18 @@ class SurveillanceSystem:
 
         results, timings = self._infer(frame)
 
-        persons, ppe_items, violation_items, _ = self._parse(
+        # Unpack — now includes proximity_objects (machinery, vehicle)
+        persons, ppe_items, violation_items, _, proximity_objects = self._parse(
             results['ppe'], self.ppe_model.names)
 
         fire_hazards = []
         if results.get('fire'):
-            _, _, _, fire_hazards = self._parse(
+            _, _, _, fire_hazards, _ = self._parse(
                 results['fire'], self.fire_model.names)
 
-        # Use ultralytics native plot() for base annotation
         annotated = results['ppe'][0].plot()
 
-        # Per-person compliance overlay
+        # ── Per-person compliance ─────────────────────────────────────────────
         compliance_list = []
         if persons:
             compliance_list = associate_ppe_to_persons(
@@ -445,12 +556,47 @@ class SurveillanceSystem:
                         f"{', '.join(person['missing'])}",
                         None, self.frame_count)
 
-        # Draw violation boxes with distinct colour
+        # ── Violation boxes ───────────────────────────────────────────────────
         for v in violation_items:
             draw_box(annotated, v['bbox'],
                      v['class'], Config.C_VIOLATION, v['conf'], 2)
 
-        # Fire/smoke overlay
+        # ── PROXIMITY HAZARD ANALYSIS ─────────────────────────────────────────
+        # Draw detected machinery/vehicle objects (previously invisible)
+        for obj in proximity_objects:
+            draw_box(annotated, obj['bbox'],
+                     obj['class'], Config.C_PROXIMITY, obj['conf'], 2)
+
+        proximity_events = []
+        if compliance_list and proximity_objects:
+            proximity_events = analyse_proximity(compliance_list, proximity_objects)
+
+            frame_prox_crit = 0
+            frame_prox_high = 0
+
+            for event in proximity_events:
+                draw_proximity_alert(annotated, event)
+
+                if event['severity'] == Config.SEV_CRITICAL:
+                    frame_prox_crit += 1
+                    self.total_proximity_crit += 1
+                    miss = ", ".join(event['missing']) or "PPE"
+                    self.alerts.alert(
+                        'proximity', Config.SEV_CRITICAL,
+                        f"CRITICAL: Person #{event['person_id']+1} without {miss} "
+                        f"is {event['distance_px']:.0f}px from {event['hazard_class']}!",
+                        annotated, self.frame_count)
+                else:
+                    frame_prox_high += 1
+                    self.total_proximity_high += 1
+                    miss = ", ".join(event['missing']) or "PPE"
+                    self.alerts.alert(
+                        'proximity', Config.SEV_HIGH,
+                        f"HIGH: Person #{event['person_id']+1} without {miss} "
+                        f"near {event['hazard_class']} ({event['distance_px']:.0f}px)",
+                        None, self.frame_count)
+
+        # ── Fire/smoke overlay ────────────────────────────────────────────────
         if fire_hazards and results.get('fire'):
             annotated = results['fire'][0].plot(img=annotated)
 
@@ -467,16 +613,22 @@ class SurveillanceSystem:
                                   annotated, self.frame_count)
 
         if self.show_dashboard:
+            prox_crit = sum(1 for e in proximity_events
+                            if e['severity'] == Config.SEV_CRITICAL)
+            prox_high = sum(1 for e in proximity_events
+                            if e['severity'] == Config.SEV_HIGH)
             stats = {
-                'frames':           self.frame_count,
-                'persons':          len(persons),
-                'violations':       sum(1 for p in compliance_list
-                                        if p['status'] != 'compliant'),
-                'fire':             len([h for h in fire_hazards
-                                         if h['class'] == 'fire']),
-                'smoke':            len([h for h in fire_hazards
-                                         if h['class'] == 'smoke']),
-                'total_violations': self.total_violations,
+                'frames':            self.frame_count,
+                'persons':           len(persons),
+                'violations':        sum(1 for p in compliance_list
+                                         if p['status'] != 'compliant'),
+                'fire':              len([h for h in fire_hazards
+                                          if h['class'] == 'fire']),
+                'smoke':             len([h for h in fire_hazards
+                                          if h['class'] == 'smoke']),
+                'total_violations':  self.total_violations,
+                'proximity_critical': prox_crit,
+                'proximity_high':    prox_high,
             }
             draw_dashboard(annotated, stats, fps, timings)
 
@@ -557,7 +709,7 @@ class SurveillanceSystem:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cap.set(cv2.CAP_PROP_FPS, 30)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # minimize latency
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         try:
             while True:
                 ret, frame = cap.read()
@@ -583,11 +735,13 @@ class SurveillanceSystem:
         print("\n" + "="*45)
         print("  SESSION SUMMARY")
         print("="*45)
-        print(f"  Frames processed : {self.frame_count}")
-        print(f"  PPE violations   : {self.total_violations}")
-        print(f"  Fire detections  : {self.total_fire}")
-        print(f"  Smoke detections : {self.total_smoke}")
-        print(f"  Total alerts     : {len(self.alerts.history)}")
+        print(f"  Frames processed   : {self.frame_count}")
+        print(f"  PPE violations     : {self.total_violations}")
+        print(f"  Proximity critical : {self.total_proximity_crit}")
+        print(f"  Proximity high     : {self.total_proximity_high}")
+        print(f"  Fire detections    : {self.total_fire}")
+        print(f"  Smoke detections   : {self.total_smoke}")
+        print(f"  Total alerts       : {len(self.alerts.history)}")
         print("="*45)
 
 

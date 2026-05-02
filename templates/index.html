@@ -912,6 +912,16 @@
               <div class="val" id="s-smoke">0</div>
               <div class="sub">detections</div>
             </div>
+            <div class="stat-card red">
+              <div class="lbl">Proximity Critical</div>
+              <div class="val" id="s-prox-crit">0</div>
+              <div class="sub">worker near machinery</div>
+            </div>
+            <div class="stat-card amber">
+              <div class="lbl">Proximity High</div>
+              <div class="val" id="s-prox-high">0</div>
+              <div class="sub">worker near hazard</div>
+            </div>
           </div>
 
           <!-- Webcam -->
@@ -1073,6 +1083,8 @@
       document.getElementById('s-violations').textContent = s.ppe_violations || 0;
       document.getElementById('s-fire').textContent = s.fire || 0;
       document.getElementById('s-smoke').textContent = s.smoke || 0;
+      document.getElementById('s-prox-crit').textContent = s.proximity_critical || 0;
+      document.getElementById('s-prox-high').textContent = s.proximity_high || 0;
       document.getElementById('an-frames').textContent = s.frames || 0;
       document.getElementById('an-viol').textContent = s.ppe_violations || 0;
       document.getElementById('an-fire').textContent = s.fire || 0;
@@ -1088,13 +1100,16 @@
       document.getElementById('bar-prec').style.width = bm.precision + '%';
       document.getElementById('bar-rec').style.width = bm.recall + '%';
 
-      // Status banner
+      // Status banner — proximity critical ranks above PPE violation
       const banner = document.getElementById('status-banner');
       const txt = document.getElementById('status-text');
       if ((s.fire || 0) > 0) {
         banner.className = 'status-banner danger';
         txt.textContent = 'CRITICAL — Fire / Smoke Detected';
-      } else if ((s.ppe_violations || 0) > 0) {
+      } else if ((s.proximity_critical || 0) > 0) {
+        banner.className = 'status-banner danger';
+        txt.textContent = 'CRITICAL — Worker Without PPE Near Machinery';
+      } else if ((s.ppe_violations || 0) > 0 || (s.proximity_high || 0) > 0) {
         banner.className = 'status-banner warning';
         txt.textContent = 'WARNING — PPE Violations Detected';
       } else if ((s.frames || 0) > 0) {
