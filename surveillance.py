@@ -44,8 +44,8 @@ class Config:
     # ── Proximity thresholds (pixels) ────────────────────────
     # Distance from person centre to hazard object centre.
     # Tune these based on your typical camera distance.
-    PROXIMITY_CRITICAL_PX = 150   # within 150px → CRITICAL
-    PROXIMITY_HIGH_PX     = 300   # within 300px → HIGH (was already HIGH)
+    PROXIMITY_CRITICAL_PX = 250   # within 250px → CRITICAL
+    PROXIMITY_HIGH_PX     = 450   # within 450px → HIGH
 
     # ── Fire model ───────────────────────────────────────────
     HAZARD_CLASSES  = ['fire', 'smoke']
@@ -146,25 +146,34 @@ def analyse_proximity(compliance_list, hazard_objects):
         if person['status'] == 'compliant':
             continue  # compliant worker near machinery is fine
 
+        # Find the single closest hazard object within threshold.
+        # One person → one proximity event max. Prevents label pile-up
+        # when multiple machinery detections exist in the same frame.
+        closest = None
+        closest_dist = float('inf')
+
         for haz in hazard_objects:
             dist = centre_dist(person['bbox'], haz['bbox'])
+            if dist < Config.PROXIMITY_HIGH_PX and dist < closest_dist:
+                closest_dist = dist
+                closest = haz
 
-            if dist < Config.PROXIMITY_CRITICAL_PX:
-                severity = Config.SEV_CRITICAL
-            elif dist < Config.PROXIMITY_HIGH_PX:
-                severity = Config.SEV_HIGH
-            else:
-                continue  # outside threshold — no event
+        if closest is None:
+            continue  # no hazard within threshold for this person
 
-            events.append({
-                'person_id':    person['id'],
-                'person_bbox':  person['bbox'],
-                'hazard_class': haz['class'],
-                'hazard_bbox':  haz['bbox'],
-                'distance_px':  round(dist, 1),
-                'severity':     severity,
-                'missing':      person['missing'],
-            })
+        severity = (Config.SEV_CRITICAL
+                    if closest_dist < Config.PROXIMITY_CRITICAL_PX
+                    else Config.SEV_HIGH)
+
+        events.append({
+            'person_id':    person['id'],
+            'person_bbox':  person['bbox'],
+            'hazard_class': closest['class'],
+            'hazard_bbox':  closest['bbox'],
+            'distance_px':  round(closest_dist, 1),
+            'severity':     severity,
+            'missing':      person['missing'],
+        })
 
     return events
 
@@ -174,8 +183,9 @@ def draw_proximity_alert(frame, event):
     Draws:
       - A danger-coloured box around the hazard object
       - A line connecting the non-compliant person to the hazard
-      - A label showing distance and missing PPE
+      - A compact label anchored just above the person bounding box
     """
+    h_frame, w_frame = frame.shape[:2]
     px, py   = box_centre(event['person_bbox'])
     hx, hy   = box_centre(event['hazard_bbox'])
     dist_px  = event['distance_px']
@@ -189,20 +199,25 @@ def draw_proximity_alert(frame, event):
     # Draw line from person centre to hazard centre
     cv2.line(frame, (px, py), (hx, hy), color, 2, cv2.LINE_AA)
 
-    # Draw distance label at midpoint of the line
-    mid_x, mid_y = (px + hx) // 2, (py + hy) // 2
-    tag   = "CRITICAL" if is_crit else "HIGH RISK"
+    # Label anchored above the PERSON box — keeps each person's label
+    # attached to that person, preventing stacking in the frame centre.
+    tag   = "CRIT" if is_crit else "HIGH"
     miss  = ", ".join(event['missing']) if event['missing'] else "PPE"
-    label = f"{tag} | {event['hazard_class']} | {dist_px:.0f}px | no {miss}"
+    label = f"{tag} | {event['hazard_class']} {dist_px:.0f}px | -{miss}"
 
-    font, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.48, 2
+    font, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.44, 1
     (tw, th), bl = cv2.getTextSize(label, font, fs, ft)
-    pad = 5
+    pad = 4
+
+    lx = max(0, int(event['person_bbox'][0]))
+    ly = max(th + pad * 2 + 2, int(event['person_bbox'][1]) - 4)
+    lx = min(lx, w_frame - tw - pad * 2 - 2)
+
     cv2.rectangle(frame,
-                  (mid_x - pad, mid_y - th - pad),
-                  (mid_x + tw + pad, mid_y + bl + pad),
+                  (lx, ly - th - pad),
+                  (lx + tw + pad * 2, ly + bl),
                   color, -1)
-    cv2.putText(frame, label, (mid_x, mid_y),
+    cv2.putText(frame, label, (lx + pad, ly),
                 font, fs, Config.C_WHITE, ft, cv2.LINE_AA)
 
 
@@ -530,7 +545,7 @@ class SurveillanceSystem:
             _, _, _, fire_hazards, _ = self._parse(
                 results['fire'], self.fire_model.names)
 
-        annotated = results['ppe'][0].plot()
+        annotated = frame.copy()  # clean frame — we draw only what we need
 
         # ── Per-person compliance ─────────────────────────────────────────────
         compliance_list = []
@@ -556,17 +571,7 @@ class SurveillanceSystem:
                         f"{', '.join(person['missing'])}",
                         None, self.frame_count)
 
-        # ── Violation boxes ───────────────────────────────────────────────────
-        for v in violation_items:
-            draw_box(annotated, v['bbox'],
-                     v['class'], Config.C_VIOLATION, v['conf'], 2)
-
         # ── PROXIMITY HAZARD ANALYSIS ─────────────────────────────────────────
-        # Draw detected machinery/vehicle objects (previously invisible)
-        for obj in proximity_objects:
-            draw_box(annotated, obj['bbox'],
-                     obj['class'], Config.C_PROXIMITY, obj['conf'], 2)
-
         proximity_events = []
         if compliance_list and proximity_objects:
             proximity_events = analyse_proximity(compliance_list, proximity_objects)
@@ -597,17 +602,18 @@ class SurveillanceSystem:
                         None, self.frame_count)
 
         # ── Fire/smoke overlay ────────────────────────────────────────────────
-        if fire_hazards and results.get('fire'):
-            annotated = results['fire'][0].plot(img=annotated)
+        # Draw fire/smoke boxes manually for consistency (no plot() clutter)
 
         for h in fire_hazards:
             if h['class'] == 'fire':
                 self.total_fire += 1
+                draw_box(annotated, h['bbox'], 'FIRE', Config.C_FIRE, h['conf'], 3)
                 self.alerts.alert('fire', Config.SEV_CRITICAL,
                                   f"FIRE detected! conf={h['conf']:.2f}",
                                   annotated, self.frame_count)
             else:
                 self.total_smoke += 1
+                draw_box(annotated, h['bbox'], 'SMOKE', Config.C_SMOKE, h['conf'], 3)
                 self.alerts.alert('smoke', Config.SEV_HIGH,
                                   f"SMOKE detected! conf={h['conf']:.2f}",
                                   annotated, self.frame_count)

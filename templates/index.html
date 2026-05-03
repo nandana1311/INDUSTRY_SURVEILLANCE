@@ -781,6 +781,156 @@
       padding: 14px 16px;
       border-top: 1px solid var(--line)
     }
+
+    /* ── RECENT ANALYSES ── */
+    .recent-section {
+      margin-top: 40px
+    }
+
+    .recent-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px
+    }
+
+    .recent-head h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink3);
+      text-transform: uppercase;
+      letter-spacing: .07em
+    }
+
+    .clear-history-btn {
+      font-size: 12px;
+      color: var(--muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: 'Outfit', sans-serif;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: color .15s
+    }
+
+    .clear-history-btn:hover {
+      color: var(--red)
+    }
+
+    .history-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      gap: 12px
+    }
+
+    .history-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--r2);
+      padding: 16px 18px;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s;
+      text-decoration: none;
+      display: block
+    }
+
+    .history-card:hover {
+      border-color: var(--green);
+      box-shadow: 0 4px 16px rgba(26, 158, 92, .08)
+    }
+
+    .hc-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 12px
+    }
+
+    .hc-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 3px;
+      word-break: break-all
+    }
+
+    .hc-time {
+      font-size: 11px;
+      color: var(--muted)
+    }
+
+    .hc-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 20px;
+      flex-shrink: 0;
+      margin-left: 10px
+    }
+
+    .hc-badge.clear {
+      background: var(--green-bg);
+      color: var(--green)
+    }
+
+    .hc-badge.warn {
+      background: var(--amber-bg);
+      color: var(--amber)
+    }
+
+    .hc-badge.danger {
+      background: var(--red-bg);
+      color: var(--red)
+    }
+
+    .hc-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px
+    }
+
+    .hc-stat {
+      text-align: center;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 8px 4px
+    }
+
+    .hc-stat .v {
+      font-size: 18px;
+      font-weight: 700;
+      font-family: 'Space Mono', monospace;
+      line-height: 1
+    }
+
+    .hc-stat .l {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 3px
+    }
+
+    .hc-stat.red .v {
+      color: var(--red)
+    }
+
+    .hc-stat.amber .v {
+      color: var(--amber)
+    }
+
+    .hc-stat.green .v {
+      color: var(--green)
+    }
+
+    .no-history {
+      background: var(--surface);
+      border: 1px dashed var(--line2);
+      border-radius: var(--r2);
+      padding: 40px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px
+    }
   </style>
 </head>
 
@@ -1024,6 +1174,18 @@
       </div>
     </div>
 
+
+    <!-- RECENT ANALYSES -->
+    <div class="recent-section">
+      <div class="recent-head">
+        <h2>Recent Analyses</h2>
+        <button class="clear-history-btn" onclick="clearHistory()">Clear history</button>
+      </div>
+      <div class="history-grid" id="history-grid">
+        <div class="no-history">No analyses yet — process an image or video to see results here.</div>
+      </div>
+    </div>
+
   </div><!-- /shell -->
 
   <script>
@@ -1262,6 +1424,113 @@
         else alert('Init failed: ' + d.error);
       });
     }
+
+    // ── Session History (localStorage) ───────────────────────────────────────────
+    const HISTORY_KEY = 'safeguard_history';
+
+    function loadHistory() {
+      try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; }
+      catch { return []; }
+    }
+
+    function saveToHistory(filename, ftype, stats) {
+      const history = loadHistory();
+      const entry = {
+        id: Date.now(),
+        filename,
+        ftype,
+        timestamp: new Date().toISOString(),
+        stats: {
+          frames: stats.frames || 0,
+          ppe_violations: stats.ppe_violations || 0,
+          fire: stats.fire || 0,
+          smoke: stats.smoke || 0,
+          total_alerts: stats.total_alerts || 0,
+          proximity_critical: stats.proximity_critical || 0,
+          proximity_high: stats.proximity_high || 0,
+        }
+      };
+      history.unshift(entry);
+      if (history.length > 20) history.splice(20);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const history = loadHistory();
+      const grid = document.getElementById('history-grid');
+      if (!history.length) {
+        grid.innerHTML = '<div class="no-history">No analyses yet — process an image or video to see results here.</div>';
+        return;
+      }
+      grid.innerHTML = history.map(e => {
+        const s = e.stats;
+        const t = new Date(e.timestamp);
+        const timeStr = t.toLocaleDateString() + ' · ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        let badgeCls = 'clear', badgeTxt = 'All Clear';
+        if ((s.fire || 0) > 0 || (s.proximity_critical || 0) > 0) { badgeCls = 'danger'; badgeTxt = 'Critical'; }
+        else if ((s.ppe_violations || 0) > 0 || (s.proximity_high || 0) > 0) { badgeCls = 'warn'; badgeTxt = 'Warning'; }
+        const shortName = e.filename.replace(/^\d{8}_\d{6}_/, '');
+        return `<div class="history-card" onclick="goToHistory(${e.id})">
+          <div class="hc-top">
+            <div>
+              <div class="hc-name">${shortName}</div>
+              <div class="hc-time">${timeStr} &middot; ${e.ftype}</div>
+            </div>
+            <span class="hc-badge ${badgeCls}">${badgeTxt}</span>
+          </div>
+          <div class="hc-stats">
+            <div class="hc-stat green">
+              <div class="v">${s.frames}</div>
+              <div class="l">Frames</div>
+            </div>
+            <div class="hc-stat red">
+              <div class="v">${s.ppe_violations}</div>
+              <div class="l">Violations</div>
+            </div>
+            <div class="hc-stat amber">
+              <div class="v">${s.proximity_critical}</div>
+              <div class="l">Prox. Crit</div>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function goToHistory(id) {
+      window.location.href = '/history?id=' + id;
+    }
+
+    function clearHistory() {
+      if (!confirm('Clear all analysis history?')) return;
+      localStorage.removeItem(HISTORY_KEY);
+      renderHistory();
+    }
+
+    // Hook: save to history when processing finishes
+    const _origPollProgress = pollProgress;
+    function pollProgress(outFile) {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        const s = await fetch(`${API}/api/status`).then(r => r.json());
+        const p = s.processing;
+        showOverlay(p.message || 'Processing…', p.progress || 0);
+        if (s.stats) updateStats(s.stats);
+        if (!p.is_processing) {
+          clearInterval(pollTimer);
+          if (p.error) { hideOverlay(); alert('Error: ' + p.error); return; }
+          hideOverlay();
+          showResult(outFile, currentType);
+          fetchAlerts();
+          if (s.stats) saveToHistory(currentFile, currentType, s.stats);
+        }
+      }, 800);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      renderHistory();
+    });
+
   </script>
 </body>
 

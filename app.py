@@ -51,6 +51,9 @@ def get_stats():
 @app.route('/')
 def index(): return render_template('index.html')
 
+
+@app.route('/history')
+def history_page(): return render_template('history.html')
 @app.route('/webcam')
 def webcam_page(): return render_template('webcam.html')
 
