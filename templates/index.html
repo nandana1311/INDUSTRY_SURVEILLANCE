@@ -1413,17 +1413,26 @@
 
     // ── Init modal (simple prompt) ────────────────────────────────────────────────
     function showInitModal() {
-      const ppe = prompt('Path to PPE model:', 'models/best.pt');
-      if (!ppe) return;
-      const fire = prompt('Path to Fire model:', 'models/fire_smoke_detection.pt');
       fetch(`${API}/api/init`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ppe_model: ppe, fire_model: fire || null })
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+       ppe_model: 'models/best.pt',
+       fire_model: 'models/fire_smoke_detection.pt'
+    })
       }).then(r => r.json()).then(d => {
-        if (d.success) { checkStatus(); }
-        else alert('Init failed: ' + d.error);
-      });
+    if (d.success) {
+      checkStatus();
+    } else {
+      alert('Init failed: ' + d.error);
     }
+  }).catch(err => {
+    alert('Init failed: ' + err.message);
+  });
+}
+window.addEventListener('DOMContentLoaded', () => {
+  showInitModal();
+});
 
     // ── Session History (localStorage) ───────────────────────────────────────────
     const HISTORY_KEY = 'safeguard_history';
