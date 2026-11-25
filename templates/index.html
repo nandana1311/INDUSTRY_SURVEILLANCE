@@ -1413,9 +1413,9 @@
 
     // ── Init modal (simple prompt) ────────────────────────────────────────────────
     function showInitModal() {
-      const ppe = prompt('Path to PPE model (e.g. ppe_detection.pt):', 'ppe_detection.pt');
+      const ppe = prompt('Path to PPE model:', 'models/best.pt');
       if (!ppe) return;
-      const fire = prompt('Path to Fire model (leave blank if none):', '');
+      const fire = prompt('Path to Fire model:', 'models/fire_smoke_detection.pt');
       fetch(`${API}/api/init`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ppe_model: ppe, fire_model: fire || null })

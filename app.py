@@ -70,7 +70,7 @@ def api_init():
             ppe_model_path=str(BASE_DIR / data.get('ppe_model', 'models/best.pt')),
             fire_model_path=str(BASE_DIR / data.get('fire_model', 'models/fire_smoke_detection.pt')),
             device=device, enable_audio=False,
-            enable_logging=True, show_dashboard=True)
+            enable_logging=True, show_dashboard=False)
         return jsonify({'success':True,'message':'System ready'})
     except Exception as e:
         return jsonify({'success':False,'error':str(e)})
@@ -222,7 +222,7 @@ if __name__ == '__main__':
                 ppe_model_path=str(BASE_DIR / args.ppe_model),
                 fire_model_path=str(BASE_DIR / args.fire_model),
                 device=device,enable_audio=False,
-                enable_logging=True,show_dashboard=True)
+                enable_logging=True,show_dashboard=False)
             print(f"✓ Surveillance system ready (Device: {device})")
         except Exception as e:
             print(f"✗ Could not auto-init: {e}")

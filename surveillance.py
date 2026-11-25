@@ -28,7 +28,7 @@ class Config:
     # ── PPE model classes  ───────────────
     PERSON_CLASS    = 'Person'
     PPE_CLASSES     = ['Hardhat', 'Mask', 'Safety Vest']
-    REQUIRED_PPE    = ['Hardhat', 'Mask', 'Safety Vest']
+    REQUIRED_PPE    = ['Hardhat','Safety Vest']
     VIOLATION_CLASSES = {
         'NO-Hardhat':     'Hardhat',
         'NO-Mask':        'Mask',
@@ -67,7 +67,7 @@ class Config:
 
     # ── Per-person association thresholds ────────────────────
     IOU_ASSIGN      = 0.10
-    DIST_ASSIGN     = 250   # pixels
+    DIST_ASSIGN     = 120   # pixels — tighter to avoid cross-person PPE assignment
 
     # ── Alert cooldown (seconds) ─────────────────────────────
     ALERT_COOLDOWN  = 5.0
@@ -109,6 +109,21 @@ def box_centre(b):
     return (int((b[0]+b[2])/2), int((b[1]+b[3])/2))
 
 
+def edge_dist(person_bbox, haz_bbox):
+    """
+    Minimum box-to-box distance: nearest edge of person box to nearest edge
+    of hazard box. If the boxes overlap, distance = 0 (worker is inside the
+    machine zone — immediate CRITICAL regardless of threshold).
+    This is the most physically accurate measure — a worker whose bounding
+    box touches the excavator box gets distance 0, not 300px to the centroid.
+    """
+    # Horizontal gap between boxes (0 if they overlap horizontally)
+    dx = max(0, max(person_bbox[0], haz_bbox[0]) - min(person_bbox[2], haz_bbox[2]))
+    # Vertical gap between boxes (0 if they overlap vertically)
+    dy = max(0, max(person_bbox[1], haz_bbox[1]) - min(person_bbox[3], haz_bbox[3]))
+    return np.sqrt(dx ** 2 + dy ** 2)
+
+
 def box_contains(outer, inner):
     cx = (inner[0]+inner[2])/2
     cy = (inner[1]+inner[3])/2
@@ -146,6 +161,19 @@ def analyse_proximity(compliance_list, hazard_objects):
         if person['status'] == 'compliant':
             continue  # compliant worker near machinery is fine
 
+        # Skip operator: if the person's centre is INSIDE a machinery box
+        # they are the machine operator, not a worker standing near it.
+        # Flagging them would always produce 0px CRITICAL incorrectly.
+        person_cx = (person['bbox'][0] + person['bbox'][2]) / 2
+        person_cy = (person['bbox'][1] + person['bbox'][3]) / 2
+        is_operator = any(
+            haz['bbox'][0] <= person_cx <= haz['bbox'][2] and
+            haz['bbox'][1] <= person_cy <= haz['bbox'][3]
+            for haz in hazard_objects
+        )
+        if is_operator:
+            continue  # person is inside machine box — treat as operator, skip
+
         # Find the single closest hazard object within threshold.
         # One person → one proximity event max. Prevents label pile-up
         # when multiple machinery detections exist in the same frame.
@@ -153,7 +181,24 @@ def analyse_proximity(compliance_list, hazard_objects):
         closest_dist = float('inf')
 
         for haz in hazard_objects:
-            dist = centre_dist(person['bbox'], haz['bbox'])
+            dist = edge_dist(person['bbox'], haz['bbox'])
+            # Additional guard: only flag if the person box does NOT
+            # fully sit inside the hazard box (handles giant machine boxes
+            # that extend across most of the frame).
+            person_area = ((person['bbox'][2] - person['bbox'][0]) *
+                           (person['bbox'][3] - person['bbox'][1]))
+            # Compute intersection area
+            ix1 = max(person['bbox'][0], haz['bbox'][0])
+            iy1 = max(person['bbox'][1], haz['bbox'][1])
+            ix2 = min(person['bbox'][2], haz['bbox'][2])
+            iy2 = min(person['bbox'][3], haz['bbox'][3])
+            if ix2 > ix1 and iy2 > iy1:
+                intersection = (ix2 - ix1) * (iy2 - iy1)
+                overlap_ratio = intersection / (person_area + 1e-6)
+                # If more than 60% of the person box is inside the machine
+                # box, they are effectively inside the machine — skip.
+                if overlap_ratio > 0.6:
+                    continue
             if dist < Config.PROXIMITY_HIGH_PX and dist < closest_dist:
                 closest_dist = dist
                 closest = haz
@@ -224,46 +269,85 @@ def draw_proximity_alert(frame, event):
 # ============================================================
 # PER-PERSON PPE ASSOCIATION
 # ============================================================
-def associate_ppe_to_persons(persons, ppe_items, violation_items):
-    results = []
+def _best_person_for_item(item_bbox, persons):
+    """
+    Returns the index of the single best-matching person for a PPE/violation item.
+    Priority:
+      1. Containment  — item centre is inside the person box (most reliable)
+      2. IoU overlap  — boxes physically overlap
+      3. Nearest      — closest person centre, only if within DIST_ASSIGN
+    This ensures each PPE item is credited to exactly ONE person — the most
+    geometrically appropriate one — preventing cross-assignment when people
+    stand close together or bounding boxes overlap.
+    """
+    best_idx  = -1
+    best_dist = float('inf')
+
     for pidx, pbbox in enumerate(persons):
-        present    = set()
-        violations = set()
+        # Priority 1: containment — unambiguous ownership
+        if box_contains(pbbox, item_bbox):
+            return pidx
 
-        for item in ppe_items:
-            if (box_contains(pbbox, item['bbox'])
-                    or iou(pbbox, item['bbox']) > Config.IOU_ASSIGN
-                    or centre_dist(pbbox, item['bbox']) < Config.DIST_ASSIGN):
-                present.add(item['class'])
+        # Priority 2: meaningful IoU overlap
+        if iou(pbbox, item_bbox) > Config.IOU_ASSIGN:
+            d = centre_dist(pbbox, item_bbox)
+            if d < best_dist:
+                best_dist = d
+                best_idx  = pidx
 
-        for item in violation_items:
-            if (box_contains(pbbox, item['bbox'])
-                    or iou(pbbox, item['bbox']) > Config.IOU_ASSIGN
-                    or centre_dist(pbbox, item['bbox']) < Config.DIST_ASSIGN):
-                missing_ppe = Config.VIOLATION_CLASSES.get(item['class'])
-                if missing_ppe:
-                    violations.add(missing_ppe)
+    # Priority 3: nearest person within distance threshold
+    # Only runs if no IoU match found
+    if best_idx == -1:
+        for pidx, pbbox in enumerate(persons):
+            d = centre_dist(pbbox, item_bbox)
+            if d < Config.DIST_ASSIGN and d < best_dist:
+                best_dist = d
+                best_idx  = pidx
 
+    return best_idx
+
+
+def associate_ppe_to_persons(persons, ppe_items, violation_items):
+    """
+    Associates each PPE/violation detection to exactly one person using
+    _best_person_for_item(), then determines compliance status per person.
+    Each item goes to its single best-matching person only — this prevents
+    a mask on Person A from also being credited to nearby Person B.
+    """
+    results = [{
+        'id':         pidx,
+        'bbox':       pbbox,
+        'present':    set(),
+        'violations': set(),
+        'missing':    [],
+        'status':     'none',
+    } for pidx, pbbox in enumerate(persons)]
+
+    for item in ppe_items:
+        idx = _best_person_for_item(item['bbox'], persons)
+        if idx >= 0:
+            results[idx]['present'].add(item['class'])
+
+    for item in violation_items:
+        idx = _best_person_for_item(item['bbox'], persons)
+        if idx >= 0:
+            missing_ppe = Config.VIOLATION_CLASSES.get(item['class'])
+            if missing_ppe:
+                results[idx]['violations'].add(missing_ppe)
+
+    for r in results:
         missing = []
         for req in Config.REQUIRED_PPE:
-            if req not in present or req in violations:
+            if req not in r['present'] or req in r['violations']:
                 missing.append(req)
-
+        r['missing'] = missing
         if not missing:
-            status = 'compliant'
+            r['status'] = 'compliant'
         elif len(missing) < len(Config.REQUIRED_PPE):
-            status = 'partial'
+            r['status'] = 'partial'
         else:
-            status = 'none'
+            r['status'] = 'none'
 
-        results.append({
-            'id':         pidx,
-            'bbox':       pbbox,
-            'present':    present,
-            'violations': violations,
-            'missing':    missing,
-            'status':     status,
-        })
     return results
 
 
